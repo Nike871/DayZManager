@@ -1,0 +1,703 @@
+<Window x:Class="DayZLauncher.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:DayZLauncher.App.ViewModels"
+        xmlns:local="clr-namespace:DayZLauncher.App"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="DayZ Manager" Icon="assets/app.ico"
+        Height="860" Width="1280" MinHeight="860" MaxHeight="860" MinWidth="1280" MaxWidth="1280"
+        ResizeMode="CanResize" WindowStyle="None"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Background="{DynamicResource BgWindowBrush}" Foreground="{DynamicResource FgTextBrush}"
+        PreviewKeyDown="MainWindow_PreviewKeyDown">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="36" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+    <Window.DataContext>
+        <vm:MainViewModel/>
+    </Window.DataContext>
+    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+    <DockPanel>
+        <!-- Custom title bar - native chrome (WindowStyle=SingleBorderWindow) only ever grays the
+             maximize button out via ResizeMode, it never actually removes it, and stripping
+             WS_MAXIMIZEBOX by hand didn't stick either (WPF re-applies its own window style at some
+             point after SourceInitialized). Drawing our own title bar via WindowChrome sidesteps
+             that entirely: there's simply no maximize button to draw. WindowChrome.CaptionHeight
+             makes this whole row draggable/double-click-restorable like a native caption, except for
+             the two buttons explicitly opted out via IsHitTestVisibleInChrome. -->
+        <Grid DockPanel.Dock="Top" Height="36" Background="{DynamicResource BgPanelBrush}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                <Image Source="assets/app.ico" Width="16" Height="16" Margin="0,0,8,0"/>
+                <TextBlock Text="DayZ Manager" VerticalAlignment="Center" FontSize="12"/>
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="&#x2014;" Style="{StaticResource TitleBarButtonStyle}" Click="MinimizeButton_Click"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True" AutomationProperties.Name="Свернуть" ToolTip="Свернуть"/>
+                <Button Content="&#x2715;" Style="{StaticResource CloseTitleBarButtonStyle}" Click="CloseButton_Click"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True" AutomationProperties.Name="Закрыть" ToolTip="Закрыть"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Everything below the title bar is wrapped in its own Grid so the settings drawer can be
+             layered on top of the toolbar/tabs/status bar as a second Grid child, without covering
+             the title bar itself - Minimize/Close and window dragging stay usable while the drawer
+             is open. The drawer's panel is pushed down by ToolbarBorder's measured height (set once
+             in MainWindow.xaml.cs, after Loaded) so it starts right under the toolbar instead of
+             overlapping it, while the dimming scrim behind it still covers the toolbar too -
+             "Запустить"/"Логи" etc. need to be just as blocked as everything else while it's open. -->
+        <Grid>
+        <DockPanel>
+        <Border x:Name="ToolbarBorder" DockPanel.Dock="Top" Padding="12,10" Background="{DynamicResource BgPanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left corner: "⋮" menu - Настройки (opens the settings drawer), Тема and Ветка as
+                     hover-out submenus. PlacementTarget/DataContext are set explicitly in code-behind
+                     (SettingsMenuButton_Click) since ContextMenu is a disconnected popup root that
+                     doesn't inherit either from the button that owns it. Placement="Bottom" here is
+                     enough on its own now that the button sits in the top-left corner - the menu just
+                     grows right/down from it, no custom placement math needed (that was only for
+                     flush-right alignment when the button used to be in the top-right corner). -->
+                <Button Grid.Column="0" x:Name="SettingsMenuButton" Content="&#x22EE;" Style="{StaticResource IconButtonStyle}"
+                        VerticalAlignment="Top" Click="SettingsMenuButton_Click" ToolTip="Настройки"
+                        AutomationProperties.Name="Настройки">
+                    <Button.ContextMenu>
+                        <ContextMenu Placement="Bottom">
+                            <MenuItem Header="Настройки" Click="OpenSettingsMenuItem_Click"/>
+                            <MenuItem Header="Тема">
+                                <MenuItem Header="Тёмная" IsCheckable="True"
+                                          IsChecked="{Binding Theme, Converter={StaticResource EnumToBoolean}, ConverterParameter=Gray}"/>
+                                <MenuItem Header="Светлая" IsCheckable="True"
+                                          IsChecked="{Binding Theme, Converter={StaticResource EnumToBoolean}, ConverterParameter=White}"/>
+                            </MenuItem>
+                            <MenuItem Header="Ветка">
+                                <MenuItem Header="Stable" IsCheckable="True" IsChecked="{Binding IsStableActive}"/>
+                                <MenuItem Header="Experimental" IsCheckable="True" IsChecked="{Binding IsExperimentalActive}"/>
+                            </MenuItem>
+                            <MenuItem Header="О программе" Click="AboutMenuItem_Click"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+
+                <!-- Server/client launch buttons with their status right underneath, + Логи - hover
+                     on a start/stop toggle previews green (will start) or red (will stop). Nudged
+                     right with a left margin now that the "⋮" button sits right before it. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="20,0,0,0" DataContext="{Binding Profile}">
+                    <StackPanel>
+                        <Button Content="{Binding ServerToggleLabel}" Tag="{Binding ServerRunningTag}" Command="{Binding ToggleServerCommand}"
+                                Style="{StaticResource StartStopButtonStyle}"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                            <TextBlock Text="Сервер:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <Ellipse Width="10" Height="10" VerticalAlignment="Center" Margin="0,2,4,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{DynamicResource FgMutedBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsServerRunning}" Value="True">
+                                                <Setter Property="Fill" Value="LimeGreen"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding ServerStatusText}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Margin="10,0,0,0">
+                        <Button Content="{Binding ClientToggleLabel}" Tag="{Binding ClientRunningTag}" Command="{Binding ToggleClientCommand}"
+                                Style="{StaticResource StartStopButtonStyle}"
+                                IsEnabled="{Binding ClientToggleEnabled}"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                            <TextBlock Text="Клиент:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <Ellipse Width="10" Height="10" VerticalAlignment="Center" Margin="0,2,4,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{DynamicResource FgMutedBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsClientRunning}" Value="True">
+                                                <Setter Property="Fill" Value="LimeGreen"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding ClientStatusText}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <Button Content="Логи" Padding="14,8" MinWidth="150" Margin="10,0,0,0" Click="OpenLogsButton_Click" VerticalAlignment="Top"/>
+
+                    <Grid Margin="16,0,0,0" VerticalAlignment="Top">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition/>
+                            <RowDefinition/>
+                            <RowDefinition/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Текущая ветка:"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding BranchName, Mode=OneWay}" FontWeight="Bold" Margin="6,0,0,0"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Версия клиент:" Margin="0,2,0,0"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ClientVersion, Mode=OneWay, TargetNullValue=—}" FontWeight="Bold" FontSize="11" Margin="6,2,0,0"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Версия сервер:" Margin="0,2,0,0"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ServerVersion, Mode=OneWay, TargetNullValue=—}" FontWeight="Bold" FontSize="11" Margin="6,2,0,0"/>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <!-- Text disabled for now - Visibility flip only, binding left in place to re-enable later. -->
+                <TextBlock Text="{Binding StatusText}" Visibility="Collapsed"/>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- Wraps the whole TabControl, not just each tab's content, so the scrim below also covers
+             the tab header strip - while busy, clicking "Клиент"/"Сервер" to switch tabs is blocked
+             the same as everything else, instead of only the settings underneath being dimmed. -->
+        <Grid Margin="10">
+        <TabControl>
+
+            <!-- ================= КЛИЕНТ ================= -->
+            <TabItem Header="Клиент">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8">
+                    <StackPanel DataContext="{Binding Profile}" IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBoolean}}">
+                        <GroupBox Header="Пути">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Label Grid.Column="0" Content="Клиент (.exe):"/>
+                                <TextBox Grid.Column="1" Text="{Binding ClientExePath, UpdateSourceTrigger=PropertyChanged}"/>
+                                <Button Grid.Column="2" Content="Обзор..." Command="{Binding BrowseClientExeCommand}"/>
+                                <Button Grid.Column="3" Content="Найти (Steam)" Command="{Binding DetectSteamCommand}"/>
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Header="Параметры запуска">
+                            <StackPanel>
+                                <WrapPanel>
+                                    <CheckBox Content="-noSplash" IsChecked="{Binding ClientNoSplash}"/>
+                                    <CheckBox Content="-skipIntro" IsChecked="{Binding ClientSkipIntro}"/>
+                                    <CheckBox Content="-world=empty" IsChecked="{Binding ClientWorldEmpty}"/>
+                                    <CheckBox Content="-noPause" IsChecked="{Binding ClientNoPause}"/>
+                                    <CheckBox Content="-window" IsChecked="{Binding ClientWindow}"/>
+                                    <CheckBox Content="-scriptDebug" IsChecked="{Binding ClientScriptDebug}"/>
+                                    <Label Content="-cpuCount (0 = авто):" Margin="16,3,6,3"/>
+                                    <TextBox Width="60" VerticalAlignment="Center" Text="{Binding CpuCount, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Label Content="-name (профиль):" Margin="16,3,6,3"/>
+                                    <TextBox Width="150" VerticalAlignment="Center" Text="{Binding ClientProfileName, UpdateSourceTrigger=PropertyChanged}"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Моды (автоматически добавляются к серверу)">
+                            <StackPanel>
+                                <Button Content="+ Добавить мод" Command="{Binding ModsList.AddCommand}" HorizontalAlignment="Left"/>
+                                <ItemsControl ItemsSource="{Binding ModsList.Entries}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                <TextBlock Text="{Binding DisplayName}" ToolTip="{Binding Path}" VerticalAlignment="Center" Width="260" TextTrimming="CharacterEllipsis"/>
+                                                <Button Content="&#xE838;" FontFamily="Segoe MDL2 Assets" Command="{Binding OpenFolderCommand}"
+                                                        Padding="6,2" MinWidth="0" Margin="0,0,4,0" ToolTip="Открыть папку" AutomationProperties.Name="Открыть папку"/>
+                                                <Button Content="&#x2715;" Command="{Binding RemoveCommand}" Padding="6,2" MinWidth="0"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Прямое подключение (необязательно)">
+                            <StackPanel Orientation="Horizontal">
+                                <Label Content="IP:"/>
+                                <TextBox Width="130" Text="{Binding ConnectIp, UpdateSourceTrigger=PropertyChanged}"
+                                         IsEnabled="{Binding UseLocalServerConnect, Converter={StaticResource InverseBoolean}}"/>
+                                <Label Content="Порт:" Margin="10,3,6,3"/>
+                                <TextBox Width="70" Text="{Binding ConnectPort, UpdateSourceTrigger=PropertyChanged}"
+                                         IsEnabled="{Binding UseLocalServerConnect, Converter={StaticResource InverseBoolean}}"/>
+                                <Label Content="Пароль:" Margin="10,3,6,3"/>
+                                <TextBox Width="130" Text="{Binding ConnectPassword, UpdateSourceTrigger=PropertyChanged}"/>
+                                <CheckBox Content="Локальный сервер" IsChecked="{Binding UseLocalServerConnect}" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Доп. аргументы командной строки">
+                            <TextBox Text="{Binding ExtraClientArgs, UpdateSourceTrigger=PropertyChanged}"/>
+                        </GroupBox>
+
+                        <GroupBox Header="Итоговая командная строка">
+                            <TextBox Text="{Binding ClientArgsPreview, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas"/>
+                        </GroupBox>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ================= СЕРВЕР ================= -->
+            <TabItem Header="Сервер">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8">
+                    <StackPanel IsEnabled="{Binding Profile.IsBusy, Converter={StaticResource InverseBoolean}}">
+                        <StackPanel DataContext="{Binding Profile}">
+                            <GroupBox Header="Пути">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <Label Grid.Row="0" Grid.Column="0" Content="Сервер (.exe):"/>
+                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ServerExePath, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Button Grid.Row="0" Grid.Column="2" Content="Обзор..." Command="{Binding BrowseServerExeCommand}"/>
+                                    <Button Grid.Row="0" Grid.Column="3" Content="Найти (Steam)" Command="{Binding DetectServerSteamCommand}"/>
+
+                                    <Label Grid.Row="1" Grid.Column="0" Content="Конфиг (serverDZ.cfg):"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ServerConfigPath, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Button Grid.Row="1" Grid.Column="2" Content="Обзор..." Command="{Binding BrowseServerConfigCommand}"/>
+
+                                    <Label Grid.Row="2" Grid.Column="0" Content="Profiles:"/>
+                                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ServerProfilesPath, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Button Grid.Row="2" Grid.Column="2" Content="Обзор..." Command="{Binding BrowseServerProfilesCommand}"/>
+                                    <Button Grid.Row="2" Grid.Column="3" Content="&#xE838;" FontFamily="Segoe MDL2 Assets" Command="{Binding OpenServerProfilesFolderCommand}"
+                                            Padding="6,2" MinWidth="0" HorizontalAlignment="Left"
+                                            ToolTip="Открыть папку" AutomationProperties.Name="Открыть папку"/>
+                                </Grid>
+                            </GroupBox>
+
+                            <GroupBox Header="Сеть / производительность">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Label Content="Порт:"/>
+                                        <TextBox Width="70" Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <Label Content="-cpuCount (0 = авто):" Margin="16,3,6,3"/>
+                                        <TextBox Width="50" Text="{Binding CpuCount, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <Label Content="-limitFPS (0 = откл.):" Margin="16,3,6,3"/>
+                                        <TextBox Width="50" Text="{Binding LimitFps, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <Label Content="-BEpath:" Margin="16,3,6,3"/>
+                                        <TextBox Width="180" Text="{Binding ServerBEPath, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="Моды (автоматически добавляются к клиенту)">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                                        <Label Content="-mod (клиентские/общие моды)"/>
+                                        <Button Content="+ Добавить мод" Command="{Binding ModsList.AddCommand}" HorizontalAlignment="Left"/>
+                                        <ItemsControl ItemsSource="{Binding ModsList.Entries}" Margin="0,8,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                        <TextBlock Text="{Binding DisplayName}" ToolTip="{Binding Path}" VerticalAlignment="Center" Width="150" TextTrimming="CharacterEllipsis"/>
+                                                        <Button Content="&#xE838;" FontFamily="Segoe MDL2 Assets" Command="{Binding OpenFolderCommand}"
+                                                        Padding="6,2" MinWidth="0" Margin="0,0,4,0" ToolTip="Открыть папку" AutomationProperties.Name="Открыть папку"/>
+                                                <Button Content="&#x2715;" Command="{Binding RemoveCommand}" Padding="6,2" MinWidth="0"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                        <Label Content="-serverMod (только серверные моды)"/>
+                                        <Button Content="+ Добавить мод" Command="{Binding ServerModsList.AddCommand}" HorizontalAlignment="Left"/>
+                                        <ItemsControl ItemsSource="{Binding ServerModsList.Entries}" Margin="0,8,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                        <TextBlock Text="{Binding DisplayName}" ToolTip="{Binding Path}" VerticalAlignment="Center" Width="150" TextTrimming="CharacterEllipsis"/>
+                                                        <Button Content="&#xE838;" FontFamily="Segoe MDL2 Assets" Command="{Binding OpenFolderCommand}"
+                                                        Padding="6,2" MinWidth="0" Margin="0,0,4,0" ToolTip="Открыть папку" AutomationProperties.Name="Открыть папку"/>
+                                                <Button Content="&#x2715;" Command="{Binding RemoveCommand}" Padding="6,2" MinWidth="0"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Grid>
+                            </GroupBox>
+
+                            <GroupBox Header="Диагностика">
+                                <WrapPanel>
+                                    <CheckBox Content="-doLogs" IsChecked="{Binding ServerDoLogs}"/>
+                                    <CheckBox Content="-adminLog" IsChecked="{Binding ServerAdminLog}"/>
+                                    <CheckBox Content="-netLog" IsChecked="{Binding ServerNetLog}"/>
+                                    <CheckBox Content="-scriptDebug" IsChecked="{Binding ServerScriptDebug}"/>
+                                    <CheckBox Content="-filePatching" IsChecked="{Binding ServerFilePatching}"/>
+                                    <CheckBox Content="-freezeCheck" IsChecked="{Binding ServerFreezeCheck}"/>
+                                </WrapPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="Доп. аргументы командной строки">
+                                <TextBox Text="{Binding ExtraServerArgs, UpdateSourceTrigger=PropertyChanged}"/>
+                            </GroupBox>
+
+                            <GroupBox Header="Итоговая командная строка">
+                                <TextBox Text="{Binding ServerArgsPreview, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas"/>
+                            </GroupBox>
+                        </StackPanel>
+
+                        <!-- Конфигурация сервера (serverDZ.cfg) -->
+                        <StackPanel DataContext="{Binding ServerConfig}">
+                            <GroupBox Header="Конфигурация сервера (serverDZ.cfg)">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                        <Button Content="Загрузить" Command="{Binding LoadCommand}"/>
+                                        <Button Content="Сохранить" Command="{Binding SaveCommand}"/>
+                                        <Button Content="Шаблон по умолчанию" Command="{Binding CreateDefaultCommand}"/>
+                                        <Button Content="Редактировать" Command="{Binding EditCommand}"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding LoadStatus}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0" Margin="0,0,24,0">
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Название сервера">
+                                                <CheckBox IsChecked="{Binding HostnamePresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="hostname" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding HostnamePresent}" Text="{Binding Hostname, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Пароль для подключения к серверу">
+                                                <CheckBox IsChecked="{Binding PasswordPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="password" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding PasswordPresent}" Text="{Binding Password, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Пароль для получения прав администратора сервера">
+                                                <CheckBox IsChecked="{Binding PasswordAdminPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="passwordAdmin" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding PasswordAdminPresent}" Text="{Binding PasswordAdmin, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Максимальное количество игроков">
+                                                <CheckBox IsChecked="{Binding MaxPlayersPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="maxPlayers" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding MaxPlayersPresent}" Text="{Binding MaxPlayers, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Качество кодека голосовой связи по сети: чем выше значение, тем лучше (0-20)">
+                                                <CheckBox IsChecked="{Binding VonCodecQualityPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="vonCodecQuality" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding VonCodecQualityPresent}" Text="{Binding VonCodecQuality, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Начальное игровое время сервера. «SystemTime» - локальное время машины. Либо формат «YYYY/MM/DD/HH/MM», например «2015/4/8/17/23»">
+                                                <CheckBox IsChecked="{Binding ServerTimePresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="serverTime" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding ServerTimePresent}" Text="{Binding ServerTime, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Ускорение времени - множитель (0.1-64). Например, 24 - игровые сутки пройдут за 1 реальный час">
+                                                <CheckBox IsChecked="{Binding ServerTimeAccelerationPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="serverTimeAcceleration" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding ServerTimeAccelerationPresent}" Text="{Binding ServerTimeAcceleration, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Ускорение ночного времени - множитель (0.1-64), дополнительно умножается на serverTimeAcceleration. Например, 4 при serverTimeAcceleration=2 - ночь в 8 раз быстрее, пройдёт за 3 реальных часа">
+                                                <CheckBox IsChecked="{Binding ServerNightTimeAccelerationPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="serverNightTimeAcceleration" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding ServerNightTimeAccelerationPresent}" Text="{Binding ServerNightTimeAcceleration, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Количество игроков, одновременно обрабатываемых при входе - предотвращает падение производительности при массовом подключении">
+                                                <CheckBox IsChecked="{Binding LoginQueueConcurrentPlayersPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="loginQueueConcurrentPlayers" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding LoginQueueConcurrentPlayersPresent}" Text="{Binding LoginQueueConcurrentPlayers, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Максимальное количество игроков, ожидающих в очереди входа одновременно">
+                                                <CheckBox IsChecked="{Binding LoginQueueMaxPlayersPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="loginQueueMaxPlayers" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding LoginQueueMaxPlayersPresent}" Text="{Binding LoginQueueMaxPlayers, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Идентификатор шарда. По умолчанию у DayZ: «123abc»">
+                                                <CheckBox IsChecked="{Binding ShardIdPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="shardId" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding ShardIdPresent}" Text="{Binding ShardId, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Задержка возрождения (сек) после гибели персонажа, прежде чем можно получить нового">
+                                                <CheckBox IsChecked="{Binding RespawnTimePresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="respawnTime" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding RespawnTimePresent}" Text="{Binding RespawnTime, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Формат временных меток в .rpt-файле: «Full» или «Short»">
+                                                <CheckBox IsChecked="{Binding TimeStampFormatPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="timeStampFormat" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding TimeStampFormatPresent}" Text="{Binding TimeStampFormat, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Записывает средний FPS сервера (интервал в секундах). Требует параметр запуска «-doLogs»">
+                                                <CheckBox IsChecked="{Binding LogAverageFpsPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="logAverageFps" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding LogAverageFpsPresent}" Text="{Binding LogAverageFps, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Записывает использование памяти сервером (интервал в секундах). Требует параметр запуска «-doLogs»">
+                                                <CheckBox IsChecked="{Binding LogMemoryPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="logMemory" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding LogMemoryPresent}" Text="{Binding LogMemory, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Записывает количество подключённых игроков (интервал в секундах). Требует параметр запуска «-doLogs»">
+                                                <CheckBox IsChecked="{Binding LogPlayersPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="logPlayers" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding LogPlayersPresent}" Text="{Binding LogPlayers, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Сохраняет лог консоли сервера в файл в папке с остальными логами. По умолчанию у DayZ: «server_console.log»">
+                                                <CheckBox IsChecked="{Binding LogFilePresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="logFile" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding LogFilePresent}" Text="{Binding LogFile, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Максимальное количество игроков, симулируемых за один кадр (влияет на производительность сервера)">
+                                                <CheckBox IsChecked="{Binding SimulatedPlayersBatchPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="simulatedPlayersBatch" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding SimulatedPlayersBatchPresent}" Text="{Binding SimulatedPlayersBatch, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Порт для Steam-запросов (A2S) к серверу">
+                                                <CheckBox IsChecked="{Binding SteamQueryPortPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <Label Content="steamQueryPort" Width="220"/>
+                                                <TextBox Width="160" IsEnabled="{Binding SteamQueryPortPresent}" Text="{Binding SteamQueryPort, UpdateSourceTrigger=PropertyChanged, TargetNullValue=''}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" Margin="24,0,0,0">
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Включение/отключение белого списка">
+                                                <CheckBox IsChecked="{Binding EnableWhitelistPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="enableWhitelist" IsChecked="{Binding EnableWhitelist}" IsEnabled="{Binding EnableWhitelistPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Отключает использование ban.txt (по умолчанию выключено)">
+                                                <CheckBox IsChecked="{Binding DisableBanlistPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disableBanlist" IsChecked="{Binding DisableBanlist}" IsEnabled="{Binding DisableBanlistPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Отключает использование priority.txt (по умолчанию выключено)">
+                                                <CheckBox IsChecked="{Binding DisablePrioritylistPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disablePrioritylist" IsChecked="{Binding DisablePrioritylist}" IsEnabled="{Binding DisablePrioritylistPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Проверка .pbo по файлам .bisign. Вкл записывает значение 2, выкл - значение 0">
+                                                <CheckBox IsChecked="{Binding VerifySignaturesPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="verifySignatures" IsChecked="{Binding VerifySignatures}" IsEnabled="{Binding VerifySignaturesPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Разрешает подключение только клиентам с той же ревизией .exe, что и у сервера">
+                                                <CheckBox IsChecked="{Binding ForceSameBuildPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="forceSameBuild" IsChecked="{Binding ForceSameBuild}" IsEnabled="{Binding ForceSameBuildPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Включение/отключение голосовой связи по сети">
+                                                <CheckBox IsChecked="{Binding DisableVoNPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disableVoN" IsChecked="{Binding DisableVoN}" IsEnabled="{Binding DisableVoNPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Включение/отключение вида от третьего лица для игроков">
+                                                <CheckBox IsChecked="{Binding Disable3rdPersonPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disable3rdPerson" IsChecked="{Binding Disable3rdPerson}" IsEnabled="{Binding Disable3rdPersonPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Включение/отключение прицела">
+                                                <CheckBox IsChecked="{Binding DisableCrosshairPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disableCrosshair" IsChecked="{Binding DisableCrosshair}" IsEnabled="{Binding DisableCrosshairPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Сохраняет игровое время сервера в хранилище - при следующем запуске используется сохранённое значение">
+                                                <CheckBox IsChecked="{Binding ServerTimePersistentPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="serverTimePersistent" IsChecked="{Binding ServerTimePersistent}" IsEnabled="{Binding ServerTimePersistentPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Протокол связи, используемый с игровым сервером - рекомендуется всегда держать включённым">
+                                                <CheckBox IsChecked="{Binding GuaranteedUpdatesPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="guaranteedUpdates" IsChecked="{Binding GuaranteedUpdates}" IsEnabled="{Binding GuaranteedUpdatesPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Проверяет файлы постоянных данных на повреждение и заменяет повреждённые пустыми">
+                                                <CheckBox IsChecked="{Binding StorageAutoFixPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="storageAutoFix" IsChecked="{Binding StorageAutoFix}" IsEnabled="{Binding StorageAutoFixPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Вкл - записывать только попадания по игрокам. Выкл - записывать все попадания (животные/заражённые)">
+                                                <CheckBox IsChecked="{Binding AdminLogPlayerHitsOnlyPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="adminLogPlayerHitsOnly" IsChecked="{Binding AdminLogPlayerHitsOnly}" IsEnabled="{Binding AdminLogPlayerHitsOnlyPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Записывать действия по размещению (ловушки, палатки)">
+                                                <CheckBox IsChecked="{Binding AdminLogPlacementPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="adminLogPlacement" IsChecked="{Binding AdminLogPlacement}" IsEnabled="{Binding AdminLogPlacementPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Записывать действия строительства базы (постройка, разбор, уничтожение)">
+                                                <CheckBox IsChecked="{Binding AdminLogBuildActionsPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="adminLogBuildActions" IsChecked="{Binding AdminLogBuildActions}" IsEnabled="{Binding AdminLogBuildActionsPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Записывать список игроков с позициями каждые 5 минут">
+                                                <CheckBox IsChecked="{Binding AdminLogPlayerListPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="adminLogPlayerList" IsChecked="{Binding AdminLogPlayerList}" IsEnabled="{Binding AdminLogPlayerListPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Показывает информацию о персонаже в отладочном окне в углу экрана">
+                                                <CheckBox IsChecked="{Binding EnableDebugMonitorPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="enableDebugMonitor" IsChecked="{Binding EnableDebugMonitor}" IsEnabled="{Binding EnableDebugMonitorPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Разрешает подключение клиентов с параметром запуска «-filePatching»">
+                                                <CheckBox IsChecked="{Binding AllowFilePatchingPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="allowFilePatching" IsChecked="{Binding AllowFilePatching}" IsEnabled="{Binding AllowFilePatchingPresent}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2" Margin="24,0,0,0">
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Многопоточная обработка репликации сервера. Число потоков задаётся в dayzSettings.xml (maxcores/reservedcores)">
+                                                <CheckBox IsChecked="{Binding MultithreadedReplicationPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="multithreadedReplication" IsChecked="{Binding MultithreadedReplication}" IsEnabled="{Binding MultithreadedReplicationPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Выкл - более светлая ночь, вкл - более тёмная ночь (значение 2 для Sakhal доступно только через сырой текст)">
+                                                <CheckBox IsChecked="{Binding LightingConfigPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="lightingConfig" IsChecked="{Binding LightingConfig}" IsEnabled="{Binding LightingConfigPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Отключает персональный свет для всех подключённых к серверу клиентов">
+                                                <CheckBox IsChecked="{Binding DisablePersonalLightPresent}" IsEnabled="False" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disablePersonalLight" IsChecked="{Binding DisablePersonalLight}" IsEnabled="{Binding DisablePersonalLightPresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Отключает повреждение/разрушение забора и вышки">
+                                                <CheckBox IsChecked="{Binding DisableBaseDamagePresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disableBaseDamage" IsChecked="{Binding DisableBaseDamage}" IsEnabled="{Binding DisableBaseDamagePresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Отключает повреждение/разрушение палаток, бочек, деревянных ящиков и морских контейнеров">
+                                                <CheckBox IsChecked="{Binding DisableContainerDamagePresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disableContainerDamage" IsChecked="{Binding DisableContainerDamage}" IsEnabled="{Binding DisableContainerDamagePresent}"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6" ToolTip="Отключает окно выбора возрождения - новые персонажи появляются в случайном месте">
+                                                <CheckBox IsChecked="{Binding DisableRespawnDialogPresent}" VerticalAlignment="Center" Margin="0,0,8,0" Style="{StaticResource PlainCheckBoxStyle}"/>
+                                                <CheckBox Content="disableRespawnDialog" IsChecked="{Binding DisableRespawnDialog}" IsEnabled="{Binding DisableRespawnDialogPresent}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="Миссия">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <TextBlock Text="Текущая:" VerticalAlignment="Center" FontWeight="Bold" Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding CurrentTemplate}" VerticalAlignment="Center" FontFamily="Consolas"/>
+                                    </StackPanel>
+                                    <ItemsControl ItemsSource="{Binding MissionOptions}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <RadioButton Content="{Binding Name}" GroupName="mission" IsChecked="{Binding IsSelected}" Margin="0,0,20,6"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Button Content="Обновить список" Command="{Binding RescanMissionsCommand}"/>
+                                        <Button Content="Открыть папку миссии" Command="{Binding OpenMissionsFolderCommand}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </GroupBox>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+        </TabControl>
+        <Border Background="#99000000" IsHitTestVisible="{Binding Profile.IsBusy}"
+                Visibility="{Binding Profile.IsBusy, Converter={StaticResource BoolToVisibility}}"/>
+        </Grid>
+        </DockPanel>
+
+        <!-- Settings drawer: slides in from the left edge over the toolbar/tabs/status bar via
+             SettingsPanelTransform, dimming everything behind it with the scrim. Collapsed (and not
+             hit-test visible) while closed so it never intercepts clicks meant for the app underneath. -->
+        <Grid x:Name="SettingsOverlay" Visibility="Collapsed">
+            <Border Background="#99000000" MouseDown="SettingsScrim_MouseDown"/>
+            <Border x:Name="SettingsPanelHost" Width="600" HorizontalAlignment="Left"
+                    Background="{DynamicResource BgPanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,1,0">
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="SettingsPanelTransform" X="-600"/>
+                </Border.RenderTransform>
+                <local:SettingsPanel x:Name="SettingsPanelControl"/>
+            </Border>
+        </Grid>
+
+        <!-- "No keys folder" warning - same full-coverage dimming scrim as the settings drawer, but
+             a small dialog centered instead of a panel sliding from the edge. Only the OK button
+             closes it (no click-outside-to-dismiss) since this is meant to be acknowledged, not
+             brushed past. -->
+        <Grid x:Name="MissingKeysOverlay" Visibility="Collapsed">
+            <Border Background="#99000000"/>
+            <Border Width="420" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{DynamicResource BgPanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <StackPanel Margin="20">
+                    <TextBlock Text="Модификация не содержит ключей подписи *****.bikey." TextWrapping="Wrap" Margin="0,0,0,4"/>
+                    <TextBlock Text="Рекомендуется отключить проверку сигнатур на сервере." TextWrapping="Wrap" Margin="0,0,0,4"/>
+                    <TextBlock Text="serverDZ → параметр &quot;verifySignatures = 0&quot;" TextWrapping="Wrap" FontFamily="Consolas" Margin="0,0,0,4"/>
+                    <TextBlock Text="Либо подпишите модификацию и повторите подключение мода." TextWrapping="Wrap" Margin="0,0,0,16"/>
+                    <Button Content="ОК" Click="MissingKeysOkButton_Click" HorizontalAlignment="Center" MinWidth="100"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- "Already added" warning - same pattern as MissingKeysOverlay above, just a single line. -->
+        <Grid x:Name="DuplicateModOverlay" Visibility="Collapsed">
+            <Border Background="#99000000"/>
+            <Border Width="420" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{DynamicResource BgPanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <StackPanel Margin="20">
+                    <TextBlock Text="Модификация уже подключена." TextWrapping="Wrap" Margin="0,0,0,16"/>
+                    <Button Content="ОК" Click="DuplicateModOkButton_Click" HorizontalAlignment="Center" MinWidth="100"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- "About" - same dialog pattern as the warnings above. -->
+        <Grid x:Name="AboutOverlay" Visibility="Collapsed">
+            <Border Background="#99000000"/>
+            <Border Width="420" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{DynamicResource BgPanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <StackPanel Margin="20">
+                    <TextBlock Text="Автор 𝕭𝖊𝖓𝖕𝖇 (Discord: sg11region.dz)" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                    <TextBlock Text="Создано при поддержке Claude AI." TextWrapping="Wrap" Margin="0,0,0,4"/>
+                    <TextBlock Text="Вы можете поддержать автора кружечкой кофе =)" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                    <TextBlock HorizontalAlignment="Center" Margin="0,0,0,12">
+                        <Hyperlink NavigateUri="https://boosty.to/nike871/donate" RequestNavigate="BoostyLink_RequestNavigate">
+                            boosty.to
+                        </Hyperlink>
+                    </TextBlock>
+                    <Image Source="assets/boosty_qr.png" Width="160" Height="160" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                    <TextBlock Text="DayZManager v 1.0.0.1 ©2026" TextWrapping="Wrap" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                    <Button Content="ОК" Click="AboutOkButton_Click" HorizontalAlignment="Center" MinWidth="100"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- First-launch prompt - same dialog pattern as MissingKeysOverlay above, shown once right
+             after the window first loads with no settings.json on disk yet. -->
+        <Grid x:Name="FirstLaunchOverlay" Visibility="Collapsed">
+            <Border Background="#99000000"/>
+            <Border Width="420" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{DynamicResource BgPanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <StackPanel Margin="20">
+                    <TextBlock Text="Выполнить автоматический поиск установленных файлов игры клиент/сервер?"
+                               TextWrapping="Wrap" Margin="0,0,0,16"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button Content="Да" Click="FirstLaunchYesButton_Click" MinWidth="100"/>
+                        <Button Content="Нет" Click="FirstLaunchNoButton_Click" MinWidth="100" Margin="0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+        </Grid>
+    </DockPanel>
+    </Border>
+</Window>

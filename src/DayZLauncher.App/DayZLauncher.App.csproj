@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>DayZManager</AssemblyName>
+    <RootNamespace>DayZLauncher.App</RootNamespace>
+    <AssemblyTitle>DayZ Manager</AssemblyTitle>
+    <Product>DayZ Manager</Product>
+    <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DayZLauncher.Core\DayZLauncher.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\app.ico" Link="assets\app.ico"/>
+    <Resource Include="..\..\assets\boosty_qr.png" Link="assets\boosty_qr.png"/>
+  </ItemGroup>
+
+</Project>

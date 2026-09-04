@@ -1,0 +1,49 @@
+<UserControl x:Class="DayZLauncher.App.SettingsPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel Background="{DynamicResource BgPanelBrush}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16">
+            <StackPanel>
+                <TextBlock Text="Основное" FontWeight="Bold" Margin="0,0,0,8"/>
+                <CheckBox Content="Запускать вместе с Windows." IsChecked="{Binding StartWithWindows}"/>
+                <CheckBox Content="Запускать программу свернуто." IsChecked="{Binding StartMinimized}" Margin="0,4,16,4"/>
+                <CheckBox Content="Разрешить программе сворачиваться в трей." IsChecked="{Binding MinimizeToTray}" Margin="0,4,16,4"/>
+                <CheckBox Content="По закрытию программы сворачивать в трей." IsChecked="{Binding CloseToTray}"
+                          IsEnabled="{Binding MinimizeToTray}" Margin="0,4,16,24"/>
+
+                <TextBlock Text="Запуск" FontWeight="Bold" Margin="0,0,0,8"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                    <CheckBox Content="Запускать клиент после запуска сервера через (сек):" IsChecked="{Binding Profile.ChainClientAfterServerLaunch}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBox Width="50" Text="{Binding ClientLaunchDelaySeconds, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <CheckBox Content="Чистить логи клиента перед запуском (.RPT, .log, .ADM)" IsChecked="{Binding ClearClientLogsOnLaunch}"/>
+                <CheckBox Content="Чистить логи сервера перед запуском (.RPT, .log, .ADM)" IsChecked="{Binding ClearServerLogsOnLaunch}"/>
+                <CheckBox Content="Вайпать сервер перед запуском." IsChecked="{Binding WipeServerStorageOnLaunch}" Margin="0,4,16,4"/>
+                <CheckBox Content="При подключении модификаций автоматически прокидывать ключи .bikey в сервер." IsChecked="{Binding CopyBikeyOnModAdd}" Margin="0,4,16,24"/>
+
+                <TextBlock Text="Горячие клавиши" FontWeight="Bold" Margin="0,0,0,8"/>
+                <StackPanel Margin="0,0,0,10">
+                    <CheckBox Content="Принудительная остановка клиент/сервер." IsChecked="{Binding EmergencyStopEnabled}"/>
+                    <TextBox x:Name="EmergencyStopHotkeyBox" Width="140" HorizontalAlignment="Left" IsReadOnly="True" Text="{Binding EmergencyStopHotkey, Mode=OneWay}"
+                             Margin="0,6,0,0" PreviewKeyDown="EmergencyStopHotkeyBox_PreviewKeyDown" ToolTip="Кликните и нажмите новую комбинацию клавиш"/>
+                </StackPanel>
+                <StackPanel Margin="0,0,0,10">
+                    <CheckBox Content="Запустить сервер" IsChecked="{Binding StartServerHotkeyEnabled}"/>
+                    <TextBox x:Name="StartServerHotkeyBox" Width="140" HorizontalAlignment="Left" IsReadOnly="True" Text="{Binding StartServerHotkey, Mode=OneWay}"
+                             Margin="0,6,0,0" PreviewKeyDown="StartServerHotkeyBox_PreviewKeyDown" ToolTip="Кликните и нажмите новую комбинацию клавиш"/>
+                </StackPanel>
+                <StackPanel>
+                    <CheckBox Content="Запустить клиент" IsChecked="{Binding StartClientHotkeyEnabled}"
+                              IsEnabled="{Binding Profile.ChainClientAfterServerLaunch, Converter={StaticResource InverseBoolean}}"/>
+                    <TextBox x:Name="StartClientHotkeyBox" Width="140" HorizontalAlignment="Left" IsReadOnly="True" Text="{Binding StartClientHotkey, Mode=OneWay}"
+                             Margin="0,6,0,0" PreviewKeyDown="StartClientHotkeyBox_PreviewKeyDown" ToolTip="Кликните и нажмите новую комбинацию клавиш"
+                             IsEnabled="{Binding Profile.ChainClientAfterServerLaunch, Converter={StaticResource InverseBoolean}}"/>
+                </StackPanel>
+
+                <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,24,16,16"/>
+                <Button Content="Сбросить настройки и перезапустить" Style="{StaticResource DangerButtonStyle}"
+                        HorizontalAlignment="Left" Click="ResetSettingsButton_Click"/>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>
